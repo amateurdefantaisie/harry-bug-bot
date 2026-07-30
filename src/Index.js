@@ -86,4 +86,4 @@ async function main() {
 }
 
 // Lancer le bot
-main();
+main();();
