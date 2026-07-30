@@ -1,0 +1,18 @@
+{
+  "name": "harry-bug-bot",
+  "version": "1.0.0",
+  "description": "Harry Bug Bot - WhatsApp stress test tool for authorized security testing",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "keywords": ["whatsapp", "bot", "security-testing"],
+  "license": "MIT",
+  "dependencies": {
+    "whatsapp-web.js": "^1.34.7",
+    "qrcode-terminal": "^0.12.0",
+    "dotenv": "^16.4.5"
+  }
+}
