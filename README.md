@@ -23,10 +23,28 @@ Modifiez `.env` et renseignez les numéros réels. Les valeurs d'exemple ne sont
 - `ADMIN_NUMBERS` : numéros qui peuvent envoyer des commandes, séparés par des virgules.
 - `TARGET_NUMBERS` : cibles de test autorisées avec leur consentement, séparées par des virgules.
 - `MAX_MESSAGES_PER_RUN` : plafond configurable de 1 à 5 messages par exécution (5 par défaut). L’assistant demande la quantité à chaque test.
-- `DELAY_MIN` et `DELAY_MAX` : délais en secondes, de 1 à 60.
+- `DELAY_MIN` et `DELAY_MAX` : délais en secondes, de 1 à 60. `BATCH_SIZE` et `BATCH_PAUSE` sont obsolètes : ils sont ignorés et peuvent être supprimés des variables d’hébergement.
 - `PUPPETEER_NO_SANDBOX` : désactivé par défaut. Ne l'activer que si l'environnement l'exige et après évaluation du risque.
 
 Sans administrateur configuré, toutes les commandes sont refusées. Une cible qui ne figure pas dans `TARGET_NUMBERS` est refusée. Les commandes administratives ne fonctionnent pas dans les groupes.
+
+## Déploiement sur un hébergeur Pterodactyl/Bot-Hosting
+
+1. Dans le panneau du serveur, choisissez la version Node.js compatible (Node 18 ou plus récent, de préférence une version LTS prise en charge par l’hébergeur).
+2. Vérifiez que le dépôt est bien cloné et que le serveur démarre dans le dossier qui contient `package.json`.
+3. Configurez les variables dans la section **Startup / Variables / Environment** du panneau. Sur un hébergeur, ces variables sont généralement injectées dans le processus Node.js : elles remplacent la configuration locale et il n’est pas nécessaire d’y téléverser un fichier `.env`.
+4. Définissez au minimum `ADMIN_NUMBERS` et `TARGET_NUMBERS` avec des numéros au format international, chiffres seulement, sans `+`, séparés par des virgules. N’ajoutez que des destinataires ayant consenti aux tests.
+5. Supprimez les anciennes variables `BATCH_SIZE` et `BATCH_PAUSE` du panneau si elles existent. Le code ne les utilise plus ; après cette correction, elles ne doivent plus empêcher le démarrage.
+6. Vérifiez que `MAX_MESSAGES_PER_RUN` est un entier entre 1 et 5, `DELAY_MIN` et `DELAY_MAX` des entiers entre 1 et 60, avec le minimum inférieur ou égal au maximum.
+7. Utilisez `npm install` si l’hébergeur ne l’exécute pas automatiquement, puis redémarrez le serveur. La commande de démarrage doit être `npm start` ou `node src/index.js`.
+8. Pour la première authentification, le processus doit pouvoir recevoir une entrée interactive et afficher le QR code. Si le panneau ne fournit pas de terminal interactif, authentifiez la session dans un terminal interactif puis conservez le dossier de session dans un stockage persistant et privé. Ne partagez pas les fichiers de session.
+
+### Différence entre `.env` et `.env.example`
+
+- `.env.example` est un modèle versionné dans Git. Il ne contient pas tes vrais numéros et le programme ne le charge pas automatiquement.
+- `.env` est ton fichier local de configuration, créé en copiant le modèle avec `cp .env.example .env`. Il est ignoré par Git et ne doit pas être envoyé au dépôt.
+- Dans Bot-Hosting, renseigne plutôt les valeurs dans les variables du panneau. Un fichier `.env` local dans Codespaces n’est pas automatiquement transféré sur le serveur d’hébergement.
+- Si l’explorateur semble montrer deux fichiers similaires, vérifie les noms complets : `.env` et `.env.example` sont deux fichiers distincts. Le dépôt ne contient pas de fichier `.env` réel.
 
 ## Démarrage
 
