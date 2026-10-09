@@ -22,7 +22,7 @@ Modifiez `.env` et renseignez les numéros réels. Les valeurs d'exemple ne sont
 
 - `ADMIN_NUMBERS` : numéros qui peuvent envoyer des commandes, séparés par des virgules.
 - `TARGET_NUMBERS` : cibles de test autorisées avec leur consentement, séparées par des virgules.
-- `MAX_MESSAGES_PER_RUN` : limite stricte de 1 à 5 messages par exécution.
+- `MAX_MESSAGES_PER_RUN` : plafond configurable de 1 à 5 messages par exécution (5 par défaut). L’assistant demande la quantité à chaque test.
 - `DELAY_MIN` et `DELAY_MAX` : délais en secondes, de 1 à 60.
 - `PUPPETEER_NO_SANDBOX` : désactivé par défaut. Ne l'activer que si l'environnement l'exige et après évaluation du risque.
 
@@ -41,13 +41,14 @@ Au premier démarrage, choisissez le QR code ou le code d'appairage. Gardez le d
 ## Commandes
 
 - `!help` : aide
-- `!test <numéro> [message]` : envoie un test borné à une cible autorisée
+- `!test` : assistant interactif demandant la cible, le nombre de messages, le texte, puis une confirmation
+- `!cancel` : annule la configuration interactive avant l’envoi
 - `!stop` : demande l'arrêt du test
 - `!stats` : statistiques en mémoire
 - `!status` : état de connexion
 - `!cible` : nombre de cibles autorisées configurées
 
-Les anciennes commandes `!bug` et `!bugconfig` sont désactivées. Chaque exécution est plafonnée à cinq messages et s'arrête en cas d'échec d'envoi. N'utilisez pas cet outil pour tester des limites anti-spam ou contacter des personnes sans consentement.
+Les anciennes commandes `!bug` et `!bugconfig` sont désactivées. L’assistant récapitule la cible, la quantité et le texte, puis exige une confirmation explicite. Le plafond reste fixé à cinq messages maximum par exécution et le test s'arrête en cas d'échec d'envoi. N'utilisez pas cet outil pour tester des limites anti-spam ou contacter des personnes sans consentement.
 
 ## Sécurité et déploiement
 
