@@ -17,13 +17,13 @@ function cleanNumber(number) {
 }
 
 function isValidNumber(number) {
-    return /^\d{8,15}$/.test(cleanNumber(number));
+    return /^\d{8,15}$/.test(String(number ?? ''));
 }
 
 function formatWhatsAppId(number) {
     const clean = cleanNumber(number);
     if (!isValidNumber(clean)) throw new TypeError('Numéro de téléphone invalide.');
-    return `${clean}@c.us`;
+    return \`${clean}@c.us\`;
 }
 
 function sleep(ms, signal) {
