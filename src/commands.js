@@ -1,210 +1,209 @@
-// src/commands.js - Gestionnaire de commandes
+// Gestionnaire de commandes avec assistant de test en plusieurs étapes.
 const config = require('./config');
 const { getClient } = require('./client');
 const { startBug, stopBug, getStats } = require('./bugger');
 const { timestamp, cleanNumber } = require('./utils');
 
-/**
- * Liste des commandes disponibles
- */
-const commands = {
-    help: {
-        desc: 'Affiche cette aide',
-        usage: '!help',
-        execute: (args, chatId) => showHelp(chatId),
-    },
-    bug: {
-        desc: 'Démarre le bug sur le contact spécifié',
-        usage: '!bug <numéro> [message]',
-        execute: (args, chatId) => cmdBug(args, chatId),
-    },
-    bugconfig: {
-        desc: 'Démarre le bug avec configuration personnalisée',
-        usage: '!bugconfig <numéro> <min> <max> <batch> <pause> [message]',
-        execute: (args, chatId) => cmdBugConfig(args, chatId),
-    },
-    stop: {
-        desc: 'Arrête le bug en cours',
-        usage: '!stop',
-        execute: () => cmdStop(),
-    },
-    stats: {
-        desc: 'Affiche les statistiques du dernier bug',
-        usage: '!stats',
-        execute: (args, chatId) => cmdStats(chatId),
-    },
-    status: {
-        desc: 'Affiche le statut du bot',
-        usage: '!status',
-        execute: (args, chatId) => cmdStatus(chatId),
-    },
-    cible: {
-        desc: 'Définit la cible par défaut depuis le .env',
-        usage: '!cible',
-        execute: (args, chatId) => cmdSetCible(args, chatId),
-    },
-};
+// Une configuration en attente par administrateur ; aucun état n'est partagé entre expéditeurs.
+const pendingTests = new Map();
 
-/**
- * Affiche l'aide
- */
-function showHelp(chatId) {
-    const prefix = config.prefix;
-    let helpText = `╔════════════════════════════════════╗\n`;
-    helpText += `║    🔮 HARRY BUG BOT - COMMANDES    ║\n`;
-    helpText += `╚════════════════════════════════════╝\n\n`;
-
-    for (const [name, cmd] of Object.entries(commands)) {
-        helpText += `${prefix}${name}\n`;
-        helpText += `   📝 ${cmd.desc}\n`;
-        helpText += `   💡 ${cmd.usage}\n\n`;
-    }
-
-    return helpText;
+function showHelp() {
+    return [
+        'HARRY BUG BOT — commandes administrateur',
+        `${config.prefix}help — afficher cette aide`,
+        `${config.prefix}test — démarrer l’assistant de test (cible, quantité, message, confirmation)`,
+        `${config.prefix}cancel — annuler l’assistant de test`,
+        `${config.prefix}stop — arrêter le test en cours`,
+        `${config.prefix}stats — statistiques du dernier test`,
+        `${config.prefix}status — état de la connexion`,
+        `${config.prefix}cible — afficher le nombre de cibles autorisées`,
+        '',
+        'Les commandes sont réservées aux numéros de ADMIN_NUMBERS.',
+        `Le nombre est choisi à chaque test, dans la limite configurée de 1 à ${config.maxMessagesPerRun} messages.`,
+        'Les cibles doivent être listées dans TARGET_NUMBERS et avoir consenti au test.',
+    ].join('\n');
 }
 
-/**
- * Commande !bug <numéro> [message]
- */
-async function cmdBug(args, chatId) {
-    if (!args || args.length === 0) {
-        // Utiliser la cible du .env
-        if (config.target.number) {
-            await startBug(config.target.number);
-            return null;
+async function handleWizardReply(msg, sender, body, pending) {
+    if (body.toLowerCase() === `${config.prefix}cancel`) {
+        pendingTests.delete(sender);
+        await msg.reply('Assistant de test annulé.');
+        return true;
+    }
+
+    if (pending.step === 'target') {
+        const number = cleanNumber(body);
+        if (!/^\d{8,15}$/.test(number)) {
+            await msg.reply('Numéro invalide. Saisissez le numéro international avec chiffres uniquement, ou !cancel pour annuler.');
+            return true;
         }
-        return `❌ Utilisation : ${config.prefix}bug <numéro>\n   Exemple : ${config.prefix}bug 33612345678`;
+        if (!config.target.allowedNumbers.includes(number)) {
+            await msg.reply('Cible refusée : ce numéro ne figure pas dans TARGET_NUMBERS. Ajoutez-le uniquement après avoir obtenu son consentement.');
+            return true;
+        }
+        pending.target = number;
+        pending.step = 'count';
+        await msg.reply(`Combien de messages de test ? Choisissez un entier de 1 à ${config.maxMessagesPerRun}.`);
+        return true;
     }
 
-    const number = cleanNumber(args[0]);
-    if (number.length < 8) {
-        return `❌ Numéro invalide : "${args[0]}". Format attendu : 33612345678`;
+    if (pending.step === 'count') {
+        if (!/^\d+$/.test(body)) {
+            await msg.reply(`Saisissez un nombre entier entre 1 et ${config.maxMessagesPerRun}, ou !cancel pour annuler.`);
+            return true;
+        }
+        const count = Number(body);
+        if (!Number.isSafeInteger(count) || count < 1 || count > config.maxMessagesPerRun) {
+            await msg.reply(`Quantité refusée. Choisissez un nombre de 1 à ${config.maxMessagesPerRun}.`);
+            return true;
+        }
+        pending.count = count;
+        pending.step = 'message';
+        await msg.reply(`Saisissez le texte à envoyer (500 caractères maximum), ou tapez DEFAULT pour utiliser le message configuré. Tapez !cancel pour annuler.`);
+        return true;
     }
 
-    const customMessage = args.slice(1).join(' ') || null;
-    await startBug(number, { message: customMessage });
-    return null;
-}
-
-/**
- * Commande !bugconfig <numéro> <min> <max> <batch> <pause> [message]
- */
-async function cmdBugConfig(args, chatId) {
-    if (!args || args.length < 5) {
-        return `❌ Utilisation : ${config.prefix}bugconfig <numéro> <min> <max> <batch> <pause> [message]\n`
-             + `   Exemple : ${config.prefix}bugconfig 33612345678 1 3 10 60 Message test`;
+    if (pending.step === 'message') {
+        const message = body.toLowerCase() === 'default' ? config.defaultMessage : body;
+        if (!message.trim() || message.length > 500) {
+            await msg.reply('Le message doit contenir entre 1 et 500 caractères. Réessayez ou tapez !cancel.');
+            return true;
+        }
+        pending.message = message.trim();
+        pending.step = 'confirm';
+        await msg.reply([
+            'Récapitulatif du test :',
+            `Cible : +${pending.target}`,
+            `Nombre de messages : ${pending.count}`,
+            `Texte : ${pending.message}`,
+            '',
+            `Répondez OUI pour lancer le test, ou NON pour annuler. (${config.prefix}cancel annule également.)`,
+        ].join('\n'));
+        return true;
     }
 
-    const number = cleanNumber(args[0]);
-    const delayMin = parseInt(args[1]);
-    const delayMax = parseInt(args[2]);
-    const batchSize = parseInt(args[3]);
-    const batchPause = parseInt(args[4]);
-    const customMessage = args.slice(5).join(' ') || null;
-
-    if (number.length < 8) return `❌ Numéro invalide`;
-    if (isNaN(delayMin) || isNaN(delayMax)) return `❌ Délais invalides`;
-    if (isNaN(batchSize) || batchSize < 1) return `❌ Taille de salve invalide`;
-    if (isNaN(batchPause) || batchPause < 1) return `❌ Pause invalide`;
-
-    await startBug(number, { delayMin, delayMax, batchSize, batchPause, message: customMessage });
-    return null;
-}
-
-/**
- * Commande !stop
- */
-function cmdStop() {
-    stopBug();
-    return null;
-}
-
-/**
- * Commande !stats
- */
-function cmdStats(chatId) {
-    const stats = getStats();
-    let text = `╔════════════════════════════════════╗\n`;
-    text += `║     📊 STATISTIQUES DU DERNIER BUG   ║\n`;
-    text += `╚════════════════════════════════════╝\n\n`;
-    text += `📨 Messages envoyés : ${stats.sent}\n`;
-    text += `❌ Échecs           : ${stats.failed}\n`;
-    text += `⏱️  Durée           : ${stats.elapsed || 'N/A'}\n`;
-    text += `🔄 Statut          : ${stats.running ? '▶️  En cours' : '⏹️  Arrêté'}\n`;
-    return text;
-}
-
-/**
- * Commande !status
- */
-function cmdStatus(chatId) {
-    const client = getClient();
-    const stats = getStats();
-
-    let text = `╔════════════════════════════════════╗\n`;
-    text += `║     🔮 HARRY BUG BOT - STATUT      ║\n`;
-    text += `╚════════════════════════════════════╝\n\n`;
-    text += `📡 Connexion     : ${client?.info ? '✅ Connecté' : '❌ Déconnecté'}\n`;
-    text += `👤 Compte        : ${client?.info?.pushname || 'N/A'}\n`;
-    text += `📱 Numéro        : ${client?.info?.wid?.user || 'N/A'}\n`;
-    text += `🔄 Bug en cours  : ${stats.running ? '▶️  Oui' : '⏹️  Non'}\n`;
-    text += `📨 Envoyés       : ${stats.sent}\n`;
-    text += `🎯 Cible .env    : ${config.target.number || 'Non définie'}\n`;
-    return text;
-}
-
-/**
- * Commande !cible <numéro>
- */
-function cmdSetCible(args, chatId) {
-    if (!args || args.length === 0) {
-        const current = config.target.number || 'Non définie';
-        return `🎯 Cible actuelle dans .env : ${current}\n`
-             + `💡 Pour utiliser la cible du .env : ${config.prefix}bug\n`
-             + `   Pour changer, modifie TARGET_NUMBER dans le fichier .env`;
+    if (pending.step === 'confirm') {
+        const answer = body.toLowerCase();
+        if (['non', 'non merci', 'no', 'n'].includes(answer)) {
+            pendingTests.delete(sender);
+            await msg.reply('Test annulé. Aucun message envoyé.');
+            return true;
+        }
+        if (!['oui', 'yes', 'y'].includes(answer)) {
+            await msg.reply('Répondez OUI pour confirmer ou NON pour annuler.');
+            return true;
+        }
+        pendingTests.delete(sender);
+        await msg.reply('Test confirmé. Démarrage…');
+        await startBug(pending.target, {
+            message: pending.message,
+            maxMessages: pending.count,
+        });
+        const s = getStats();
+        await msg.reply(`Test terminé. Envoyés : ${s.sent}. Échecs : ${s.failed}. Durée : ${s.elapsed}.`);
+        return true;
     }
 
-    const number = cleanNumber(args[0]);
-    if (number.length < 8) return `❌ Numéro invalide`;
-
-    // On ne modifie que pour la session en cours (pas le .env)
-    config.target.number = number;
-    return `🎯 Cible temporaire définie sur ${number} (valable uniquement pour cette session)`;
+    pendingTests.delete(sender);
+    await msg.reply('Assistant réinitialisé. Envoyez !test pour recommencer.');
+    return true;
 }
 
-/**
- * Traite un message entrant et exécute la commande si applicable
- */
 async function handleMessage(msg) {
-    const prefix = config.prefix;
+    if (!msg || typeof msg.body !== 'string' || !msg.from) return;
+
     const body = msg.body.trim();
-
-    // Vérifier si le message commence par le préfixe
-    if (!body.startsWith(prefix)) return;
-
-    const parts = body.slice(prefix.length).split(/\s+/);
-    const commandName = parts[0].toLowerCase();
-    const args = parts.slice(1);
-    const chatId = msg.from;
-
-    // Chercher la commande
-    const command = commands[commandName];
-    if (!command) {
-        await msg.reply(`❌ Commande inconnue. Tape ${prefix}help pour voir les commandes disponibles.`);
+    const sender = cleanNumber(String(msg.author || msg.from).split('@')[0]);
+    if (!config.admins.includes(sender)) {
+        if (body.startsWith(config.prefix)) {
+            console.warn(`[${timestamp()}] Commande ignorée : expéditeur non autorisé.`);
+        }
+        return;
+    }
+    if (msg.from.endsWith('@g.us')) {
+        if (body.startsWith(config.prefix)) {
+            await msg.reply('Commandes administratives désactivées dans les groupes.');
+        }
         return;
     }
 
-    console.log(`[${timestamp()}] 📩 Commande reçue : ${prefix}${commandName} ${args.join(' ')}`);
+    const pending = pendingTests.get(sender);
+    if (pending && !body.startsWith(config.prefix)) {
+        try {
+            await handleWizardReply(msg, sender, body, pending);
+        } catch (err) {
+            console.error(`[${timestamp()}] Erreur assistant de test : ${err.stack || err.message}`);
+            await msg.reply(`Opération refusée ou échouée : ${err.message}`);
+        }
+        return;
+    }
+
+    if (!body.startsWith(config.prefix)) return;
+    const parts = body.slice(config.prefix.length).trim().split(/\s+/);
+    const commandName = (parts.shift() || '').toLowerCase();
+    const args = parts;
+    let response;
 
     try {
-        const result = await command.execute(args, chatId);
-        if (result) {
-            await msg.reply(result);
+        switch (commandName) {
+            case 'help':
+                response = showHelp();
+                break;
+            case 'test':
+                if (args.length) {
+                    response = `Utilisation : ${config.prefix}test — le bot vous demandera ensuite la cible, la quantité et le message.`;
+                    break;
+                }
+                if (getStats().running) {
+                    response = 'Un test est déjà en cours. Utilisez !stop pour demander son arrêt.';
+                    break;
+                }
+                pendingTests.set(sender, { step: 'target' });
+                response = 'Assistant de test : saisissez le numéro international de la cible autorisée. Tapez !cancel pour annuler.';
+                break;
+            case 'cancel':
+                pendingTests.delete(sender);
+                response = 'Assistant de test annulé.';
+                break;
+            case 'bug':
+            case 'bugconfig':
+                response = 'Cette ancienne commande est désactivée. Utilisez !test pour configurer un test étape par étape.';
+                break;
+            case 'stop':
+                response = stopBug() ? 'Arrêt demandé.' : 'Aucun test en cours.';
+                break;
+            case 'stats': {
+                const s = getStats();
+                response = [
+                    'Statistiques du test',
+                    `Envoyés : ${s.sent}`,
+                    `Échecs : ${s.failed}`,
+                    `Durée : ${s.elapsed || '0s'}`,
+                    `État : ${s.running ? 'en cours' : 'arrêté'}`,
+                    s.lastError ? `Dernière erreur : ${s.lastError}` : null,
+                ].filter(Boolean).join('\n');
+                break;
+            }
+            case 'status': {
+                const client = getClient();
+                response = [
+                    `Connexion : ${client?.info ? 'connecté' : 'déconnecté'}`,
+                    `Compte : ${client?.info?.pushname || 'indisponible'}`,
+                    `Test en cours : ${getStats().running ? 'oui' : 'non'}`,
+                ].join('\n');
+                break;
+            }
+            case 'cible':
+                response = `Nombre de cibles autorisées configurées : ${config.target.allowedNumbers.length}. Les numéros ne sont pas affichés dans le chat.`;
+                break;
+            default:
+                response = `Commande inconnue. Tapez ${config.prefix}help.`;
         }
+        if (response) await msg.reply(response);
     } catch (err) {
-        console.error(`[${timestamp()}] ❌ Erreur commande ${commandName} :`, err.message);
-        await msg.reply(`❌ Erreur : ${err.message}`);
+        console.error(`[${timestamp()}] Erreur commande ${commandName}: ${err.stack || err.message}`);
+        await msg.reply(`Opération refusée ou échouée : ${err.message}`);
     }
 }
 
-module.exports = { handleMessage, commands };
+module.exports = { handleMessage };

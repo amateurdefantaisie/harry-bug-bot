@@ -1,180 +1,97 @@
-// src/bugger.js - Cœur du système d'envoi de messages (le "bug")
+// Envoi de tests bornés, uniquement vers une cible explicitement autorisée.
 const config = require('./config');
 const { getClient } = require('./client');
-const { randomDelay, timestamp, formatWhatsAppId, sleep } = require('./utils');
+const { randomDelay, timestamp, formatWhatsAppId, sleep, cleanNumber } = require('./utils');
 
 let isRunning = false;
-let stopRequested = false;
-let stats = {
-    sent: 0,
-    failed: 0,
-    startedAt: null,
-    elapsed: '0s',
-};
+let controller = null;
+let stats = { sent: 0, failed: 0, startedAt: null, elapsed: '0s', lastError: null };
 
-/**
- * Messages variés pour éviter la détection par motifs répétés
- */
-const messagePool = [
-    '🔮 Harry Bug Bot - Test #',
-    '⚡ Bug en cours... #',
-    '📡 Transmission #',
-    '🔄 Pulsation #',
-    '🌀 Vague #',
-    '🔋 Signal #',
-    '📨 Paquet #',
-    '🎯 Ciblage #',
-    '💫 Impact #',
-    '🔥 Flux #',
-];
-
-/**
- * Envoie un message avec un contenu légèrement varié
- */
-async function sendMessage(chatId, index) {
+async function sendMessage(chatId, message, index) {
     const client = getClient();
-    if (!client) return false;
-
+    if (!client?.info) throw new Error('Client WhatsApp non connecté.');
     try {
-        const baseMsg = messagePool[index % messagePool.length];
-        const timestamp_suffix = Date.now().toString().slice(-4);
-        const message = `${baseMsg}${index} [${timestamp_suffix}]`;
-
         await client.sendMessage(chatId, message);
         stats.sent++;
         return true;
     } catch (err) {
         stats.failed++;
-        console.error(`[${timestamp()}] ❌ Échec envoi #${index} :`, err.message);
+        stats.lastError = err.message;
+        console.error(`[${timestamp()}] Échec du message de test #${index}: ${err.message}`);
         return false;
     }
 }
 
-/**
- * Démarre la boucle d'envoi de messages
- */
 async function startBug(targetNumber, customConfig = {}) {
-    const chatId = formatWhatsAppId(targetNumber);
+    const number = cleanNumber(targetNumber);
+    if (!/^\d{8,15}$/.test(number)) throw new Error('Numéro cible invalide.');
+    if (!config.target.allowedNumbers.includes(number)) {
+        throw new Error('Cible refusée : ajoutez ce numéro à TARGET_NUMBERS uniquement après avoir obtenu son consentement.');
+    }
+    if (isRunning) throw new Error('Un test est déjà en cours.');
+
     const client = getClient();
+    if (!client?.info) throw new Error('Client WhatsApp non connecté.');
 
-    if (!client) {
-        console.log(`[${timestamp()}] ❌ Client WhatsApp non initialisé`);
-        return;
+    const delayMin = customConfig.delayMin ?? config.delay.min;
+    const delayMax = customConfig.delayMax ?? config.delay.max;
+    const maxMessages = customConfig.maxMessages ?? config.maxMessagesPerRun;
+    const message = String(customConfig.message || config.defaultMessage).trim().slice(0, 500);
+
+    if (!Number.isInteger(delayMin) || delayMin < 1 || delayMin > 60 ||
+        !Number.isInteger(delayMax) || delayMax < delayMin || delayMax > 60) {
+        throw new Error('Délais invalides (1–60 secondes et minimum ≤ maximum).');
     }
-
-    if (isRunning) {
-        console.log(`[${timestamp()}] ⚠️ Le bug est déjà en cours ! Tape !stop pour arrêter.`);
-        return;
+    if (!Number.isInteger(maxMessages) || maxMessages < 1 || maxMessages > 5) {
+        throw new Error('Un test est limité à 5 messages maximum par exécution.');
     }
+    if (!message) throw new Error('Le message de test ne peut pas être vide.');
 
-    // Fusionner la config par défaut avec les customisations
-    const cfg = {
-        delayMin: customConfig.delayMin || config.delay.min,
-        delayMax: customConfig.delayMax || config.delay.max,
-        batchSize: customConfig.batchSize || config.batch.size,
-        batchPause: customConfig.batchPause || config.batch.pause,
-        message: customConfig.message || config.defaultMessage,
-    };
-
-    // Vérifier que le contact existe / est accessible
+    const chatId = formatWhatsAppId(number);
     try {
         const contact = await client.getContactById(chatId);
-        console.log(`[${timestamp()}] 🎯 Cible : ${contact.pushname || contact.name || targetNumber}`);
-    } catch (err) {
-        console.log(`[${timestamp()}] ⚠️ Contact introuvable, tentative d'envoi direct...`);
+        console.log(`[${timestamp()}] Cible autorisée : ${contact.pushname || contact.name || 'contact confirmé'}`);
+    } catch {
+        throw new Error('Impossible de confirmer la cible. Aucun message envoyé.');
     }
 
     isRunning = true;
-    stopRequested = false;
-    stats.sent = 0;
-    stats.failed = 0;
-    stats.startedAt = new Date();
+    controller = new AbortController();
+    stats = { sent: 0, failed: 0, startedAt: new Date(), elapsed: '0s', lastError: null };
+    const signal = controller.signal;
+    console.log(`[${timestamp()}] Test autorisé démarré (maximum ${maxMessages} message(s)).`);
 
-    console.log(`\n╔══════════════════════════════════════════╗`);
-    console.log(`║        🔮 HARRY BUG BOT - LANCÉ         ║`);
-    console.log(`╠══════════════════════════════════════════╣`);
-    console.log(`║  Cible         : ${targetNumber.padEnd(22)}║`);
-    console.log(`║  Délai         : ${String(cfg.delayMin).padEnd(2)}-${String(cfg.delayMax).padEnd(2)}s               ║`);
-    console.log(`║  Salve         : ${String(cfg.batchSize).padEnd(2)} msg / ${String(cfg.batchPause).padEnd(2)}s       ║`);
-    console.log(`╚══════════════════════════════════════════╝\n`);
-
-    let globalIndex = 0;
-
-    while (!stopRequested) {
-        // Envoyer une salve de messages
-        for (let i = 0; i < cfg.batchSize && !stopRequested; i++) {
-            globalIndex++;
-            const success = await sendMessage(chatId, globalIndex);
-            
-            const status = success ? '✅' : '❌';
-            process.stdout.write(`\r[${timestamp()}] ${status} Message #${globalIndex} envoyé`);
-
-            if (!stopRequested) {
-                const delay = randomDelay(cfg.delayMin, cfg.delayMax);
-                await sleep(delay);
-            }
+    try {
+        for (let index = 1; index <= maxMessages && !signal.aborted; index++) {
+            const ok = await sendMessage(chatId, message, index);
+            if (!ok) break;
+            if (index < maxMessages && !signal.aborted) await sleep(randomDelay(delayMin, delayMax), signal);
         }
-
-        if (stopRequested) break;
-
-        // Pause entre les salves
-        console.log(`\n[${timestamp()}] ⏸️  Pause de ${cfg.batchPause}s (${stats.sent} envoyés, ${stats.failed} échecs)`);
-        for (let i = cfg.batchPause; i > 0 && !stopRequested; i--) {
-            process.stdout.write(`\r   ⏳ Prochaine salve dans ${i}s   `);
-            await sleep(1000);
-        }
-        process.stdout.write(`\r                                 \r`);
-        console.log(`[${timestamp()}] ▶️  Reprise...\n`);
+    } finally {
+        stats.elapsed = formatElapsed(stats.startedAt);
+        isRunning = false;
+        controller = null;
+        console.log(`[${timestamp()}] Test terminé : ${stats.sent} envoyé(s), ${stats.failed} échec(s), durée ${stats.elapsed}.`);
     }
-
-    // Arrêt propre
-    stats.elapsed = formatElapsed(stats.startedAt);
-    isRunning = false;
-
-    console.log(`\n╔══════════════════════════════════════════╗`);
-    console.log(`║       🔮 HARRY BUG BOT - ARRÊTÉ        ║`);
-    console.log(`╠══════════════════════════════════════════╣`);
-    console.log(`║  Envoyés  : ${String(stats.sent).padEnd(29)}║`);
-    console.log(`║  Échecs   : ${String(stats.failed).padEnd(29)}║`);
-    console.log(`║  Durée    : ${stats.elapsed.padEnd(29)}║`);
-    console.log(`╚══════════════════════════════════════════╝\n`);
 }
 
-/**
- * Arrête la boucle d'envoi
- */
 function stopBug() {
-    if (!isRunning) {
-        console.log(`[${timestamp()}] ⚠️ Aucun bug en cours.`);
-        return;
-    }
-    stopRequested = true;
-    console.log(`[${timestamp()}] 🛑 Arrêt demandé...`);
+    if (!isRunning || !controller) return false;
+    controller.abort();
+    return true;
 }
 
-/**
- * Formate le temps écoulé
- */
 function formatElapsed(start) {
-    const diff = Math.floor((new Date() - start) / 1000);
-    const h = Math.floor(diff / 3600);
-    const m = Math.floor((diff % 3600) / 60);
-    const s = diff % 60;
-    
-    if (h > 0) return `${h}h ${m}m ${s}s`;
-    if (m > 0) return `${m}m ${s}s`;
-    return `${s}s`;
+    if (!start) return '0s';
+    const seconds = Math.max(0, Math.floor((Date.now() - start.getTime()) / 1000));
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    return h ? `${h}h ${m}m ${s}s` : m ? `${m}m ${s}s` : `${s}s`;
 }
 
-/**
- * Retourne les stats actuelles
- */
 function getStats() {
     return { ...stats, running: isRunning };
 }
 
-module.exports = {
-    startBug,
-    stopBug,
-    getStats,
-};
+module.exports = { startBug, stopBug, getStats };
