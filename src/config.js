@@ -39,13 +39,32 @@ const targetNumbers = [...new Set([
 ])];
 const adminNumbers = [...new Set(numberList(process.env.ADMIN_NUMBERS, 'ADMIN_NUMBERS'))];
 
+function messageLimitEnv() {
+    const raw = process.env.MAX_MESSAGES_PER_RUN;
+    if (raw === undefined || raw.trim() === '') return 5;
+    if (!/^\\d+$/.test(raw.trim())) {
+        console.warn('[CONFIG] MAX_MESSAGES_PER_RUN invalide ; valeur sûre 5 utilisée.');
+        return 5;
+    }
+    const value = Number(raw.trim());
+    if (!Number.isSafeInteger(value) || value < 1) {
+        console.warn('[CONFIG] MAX_MESSAGES_PER_RUN doit être positif ; valeur sûre 5 utilisée.');
+        return 5;
+    }
+    if (value > 5) {
+        console.warn('[CONFIG] MAX_MESSAGES_PER_RUN dépasse le plafond autorisé ; valeur ramenée à 5.');
+        return 5;
+    }
+    return value;
+}
+
 const config = {
     prefix,
     target: { number: targetNumbers[0] || null, allowedNumbers: targetNumbers },
     admins: adminNumbers,
     delay: { min: delayMin, max: delayMax },
     // La quantité est demandée à chaque test ; ce réglage fixe le plafond autorisé.
-    maxMessagesPerRun: intEnv('MAX_MESSAGES_PER_RUN', 5, { min: 1, max: 5 }),
+    maxMessagesPerRun: messageLimitEnv(),
     defaultMessage: (process.env.DEFAULT_MESSAGE || 'Harry Bug Bot — message de test autorisé').slice(0, 500),
     sessionName: (process.env.SESSION_NAME || 'harry-bug-session').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32) || 'harry-bug-session',
     puppeteerNoSandbox: process.env.PUPPETEER_NO_SANDBOX === 'true',
