@@ -44,10 +44,6 @@ const config = {
     target: { number: targetNumbers[0] || null, allowedNumbers: targetNumbers },
     admins: adminNumbers,
     delay: { min: delayMin, max: delayMax },
-    batch: {
-        size: intEnv('BATCH_SIZE', 1, { min: 1, max: 5 }),
-        pause: intEnv('BATCH_PAUSE', 30, { min: 10, max: 3600 }),
-    },
     // La quantité est demandée à chaque test ; ce réglage fixe le plafond autorisé.
     maxMessagesPerRun: intEnv('MAX_MESSAGES_PER_RUN', 5, { min: 1, max: 5 }),
     defaultMessage: (process.env.DEFAULT_MESSAGE || 'Harry Bug Bot — message de test autorisé').slice(0, 500),
@@ -55,8 +51,5 @@ const config = {
     puppeteerNoSandbox: process.env.PUPPETEER_NO_SANDBOX === 'true',
 };
 
-if (config.batch.size > config.maxMessagesPerRun) {
-    throw new Error('BATCH_SIZE ne peut pas dépasser MAX_MESSAGES_PER_RUN.');
-}
 
 module.exports = config;
