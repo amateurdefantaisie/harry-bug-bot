@@ -50,7 +50,7 @@ async function createClient() {
     authMethod = await chooseAuthMethod();
     const puppeteerArgs = ['--disable-dev-shm-usage', '--no-first-run', '--disable-gpu'];
     // N’activer --no-sandbox que sur une plateforme qui l’exige explicitement.
-    if (config.puppeteerSandbox) puppeteerArgs.push('--no-sandbox', '--disable-setuid-sandbox');
+    if (config.puppeteerNoSandbox) puppeteerArgs.push('--no-sandbox', '--disable-setuid-sandbox');
 
     client = new Client({
         authStrategy: new LocalAuth({ clientId: config.sessionName }),
