@@ -13,8 +13,17 @@ function intEnv(name, fallback, { min = 0, max = Number.MAX_SAFE_INTEGER } = {})
     return value;
 }
 
-function numberList(value) {
-    return (value || '').split(',').map(v => cleanNumber(v.trim())).filter(Boolean);
+function numberList(value, variableName) {
+    return (value || '').split(',').map(v => v.trim()).filter(Boolean).map(raw => {
+        if (!/^\+?[\d\s()-]+$/.test(raw)) {
+            throw new Error(`Variable ${variableName} : numéro invalide. Utilisez le format international avec chiffres uniquement, ou +, espaces, parenthèses et tirets.`);
+        }
+        const number = cleanNumber(raw);
+        if (!/^\d{8,15}$/.test(number)) {
+            throw new Error(`Variable ${variableName} : chaque numéro doit contenir 8 à 15 chiffres.`);
+        }
+        return number;
+    });
 }
 
 const prefix = process.env.PREFIX || '!';
@@ -25,10 +34,10 @@ const delayMax = intEnv('DELAY_MAX', 6, { min: 1, max: 60 });
 if (delayMin > delayMax) throw new Error('DELAY_MIN ne peut pas dépasser DELAY_MAX.');
 
 const targetNumbers = [...new Set([
-    ...numberList(process.env.TARGET_NUMBERS),
-    ...numberList(process.env.TARGET_NUMBER),
+    ...numberList(process.env.TARGET_NUMBERS, 'TARGET_NUMBERS'),
+    ...numberList(process.env.TARGET_NUMBER, 'TARGET_NUMBER'),
 ])];
-const adminNumbers = [...new Set(numberList(process.env.ADMIN_NUMBERS))];
+const adminNumbers = [...new Set(numberList(process.env.ADMIN_NUMBERS, 'ADMIN_NUMBERS'))];
 
 const config = {
     prefix,
@@ -36,14 +45,13 @@ const config = {
     admins: adminNumbers,
     delay: { min: delayMin, max: delayMax },
     batch: {
-        // Ce projet est limité à de petits tests consentis : pas de boucle infinie.
         size: intEnv('BATCH_SIZE', 1, { min: 1, max: 5 }),
         pause: intEnv('BATCH_PAUSE', 30, { min: 10, max: 3600 }),
     },
     maxMessagesPerRun: intEnv('MAX_MESSAGES_PER_RUN', 1, { min: 1, max: 5 }),
     defaultMessage: (process.env.DEFAULT_MESSAGE || 'Harry Bug Bot — message de test autorisé').slice(0, 500),
     sessionName: (process.env.SESSION_NAME || 'harry-bug-session').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32) || 'harry-bug-session',
-    puppeteerSandbox: process.env.PUPPETEER_NO_SANDBOX === 'true',
+    puppeteerNoSandbox: process.env.PUPPETEER_NO_SANDBOX === 'true',
 };
 
 if (config.batch.size > config.maxMessagesPerRun) {
