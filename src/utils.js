@@ -1,48 +1,42 @@
-// src/utils.js - Fonctions utilitaires
-
-/**
- * Génère un délai aléatoire entre min et max secondes
- */
+// Fonctions utilitaires.
 function randomDelay(min, max) {
+    if (!Number.isInteger(min) || !Number.isInteger(max) || min < 1 || max < min) {
+        throw new RangeError('Délais invalides.');
+    }
     return Math.floor(Math.random() * (max - min + 1) + min) * 1000;
 }
 
-/**
- * Formate une date en horaire lisible
- */
 function timestamp() {
     return new Date().toLocaleTimeString('fr-FR', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit'
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
     });
 }
 
-/**
- * Nettoie un numéro de téléphone (garde uniquement les chiffres)
- */
 function cleanNumber(number) {
-    return number.replace(/[^0-9]/g, '');
+    return String(number ?? '').replace(/\D/g, '');
 }
 
-/**
- * Génère l'ID WhatsApp à partir d'un numéro
- */
+function isValidNumber(number) {
+    return /^\d{8,15}$/.test(cleanNumber(number));
+}
+
 function formatWhatsAppId(number) {
-    return `${cleanNumber(number)}@c.us`;
+    const clean = cleanNumber(number);
+    if (!isValidNumber(clean)) throw new TypeError('Numéro de téléphone invalide.');
+    return `${clean}@c.us`;
 }
 
-/**
- * Pause asynchrone
- */
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+function sleep(ms, signal) {
+    if (signal?.aborted) return Promise.resolve();
+    return new Promise(resolve => {
+        const timer = setTimeout(done, ms);
+        function done() {
+            clearTimeout(timer);
+            signal?.removeEventListener('abort', done);
+            resolve();
+        }
+        signal?.addEventListener('abort', done, { once: true });
+    });
 }
 
-module.exports = {
-    randomDelay,
-    timestamp,
-    cleanNumber,
-    formatWhatsAppId,
-    sleep,
-};
+module.exports = { randomDelay, timestamp, cleanNumber, isValidNumber, formatWhatsAppId, sleep };
