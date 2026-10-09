@@ -23,7 +23,7 @@ function isValidNumber(number) {
 function formatWhatsAppId(number) {
     const clean = cleanNumber(number);
     if (!isValidNumber(clean)) throw new TypeError('Numéro de téléphone invalide.');
-    return \`${clean}@c.us\`;
+    return clean + '@c.us';
 }
 
 function sleep(ms, signal) {
