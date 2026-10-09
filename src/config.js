@@ -5,7 +5,7 @@ const { cleanNumber } = require('./utils');
 function intEnv(name, fallback, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
     const raw = process.env[name];
     if (raw === undefined || raw.trim() === '') return fallback;
-    if (!/^\d+$/.test(raw.trim())) throw new Error(`Variable ${name} : entier positif attendu.`);
+    if (!/^[0-9]+$/.test(raw.trim())) {
     const value = Number(raw);
     if (!Number.isSafeInteger(value) || value < min || value > max) {
         throw new Error(`Variable ${name} : valeur attendue entre ${min} et ${max}.`);
@@ -42,7 +42,7 @@ const adminNumbers = [...new Set(numberList(process.env.ADMIN_NUMBERS, 'ADMIN_NU
 function messageLimitEnv() {
     const raw = process.env.MAX_MESSAGES_PER_RUN;
     if (raw === undefined || raw.trim() === '') return 5;
-    if (!/^\\d+$/.test(raw.trim())) {
+    if (!/^[0-9]+$/.test(raw.trim())) {
         console.warn('[CONFIG] MAX_MESSAGES_PER_RUN invalide ; valeur sûre 5 utilisée.');
         return 5;
     }
